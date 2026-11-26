@@ -15,7 +15,7 @@ class BookListScreen extends ConsumerWidget {
     final user = ref.watch(sessionProvider).value;
     if (user == null) return const Scaffold();
 
-    final booksState = ref.watch(bookListProvider(user.id));
+    final booksState = ref.watch(bookListProvider(user.uid));
     final authBusy = ref.watch(authActionsProvider).isLoading;
     return Scaffold(
       appBar: AppBar(
@@ -32,7 +32,7 @@ class BookListScreen extends ConsumerWidget {
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (error, _) => ScreenMessage(
           bookErrorMessage(error, 'cargar los libros'),
-          onRetry: () => ref.invalidate(bookListProvider(user.id)),
+          onRetry: () => ref.invalidate(bookListProvider(user.uid)),
         ),
         data: (books) => Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -40,7 +40,7 @@ class BookListScreen extends ConsumerWidget {
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
               child: Text(
-                'Hola, ${userDisplayName(user)}',
+                'Hola, ${user.displayName}',
                 style: Theme.of(context).textTheme.titleMedium,
               ),
             ),

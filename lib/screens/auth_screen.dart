@@ -25,7 +25,6 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
   bool _hidePassword = true;
   bool _hideConfirmation = true;
   String? _error;
-  bool _needsEmailConfirmation = false;
 
   @override
   void dispose() {
@@ -40,33 +39,23 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
     if (!_formKey.currentState!.validate()) return;
 
     FocusScope.of(context).unfocus();
-    setState(() {
-      _error = null;
-      _needsEmailConfirmation = false;
-    });
+    setState(() => _error = null);
 
     final actions = ref.read(authActionsProvider.notifier);
-    var needsEmailConfirmation = false;
-    switch (widget.mode) {
-      case AuthMode.login:
-        await actions.signIn(_email.text.trim(), _password.text);
-      case AuthMode.register:
-        needsEmailConfirmation = await actions.register(
-          _name.text.trim(),
-          _email.text.trim(),
-          _password.text,
-        );
-      case AuthMode.completeProfile:
-        await actions.completeProfile(_name.text.trim());
-    }
+    await switch (widget.mode) {
+      AuthMode.login => actions.signIn(_email.text.trim(), _password.text),
+      AuthMode.register => actions.register(
+        _name.text.trim(),
+        _email.text.trim(),
+        _password.text,
+      ),
+      AuthMode.completeProfile => actions.completeProfile(_name.text.trim()),
+    };
 
-    // El router abre la biblioteca al recibir una sesión de Supabase.
+    // El router abre la biblioteca cuando Firebase informa una sesión válida.
     if (!mounted) return;
     final error = ref.read(authActionsProvider).error;
-    setState(() {
-      _error = error == null ? null : authErrorMessage(error);
-      _needsEmailConfirmation = needsEmailConfirmation;
-    });
+    if (error != null) setState(() => _error = authErrorMessage(error));
   }
 
   Future<void> _signOut() async {
@@ -89,6 +78,12 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
       AuthMode.register => 'Crear cuenta',
       AuthMode.completeProfile => 'Completar perfil',
     };
+    final profileError = authState.error;
+    final message =
+        _error ??
+        (completeProfile && profileError is ProfileSaveException
+            ? authErrorMessage(profileError)
+            : null);
     return Scaffold(
       appBar: AppBar(title: const Text('Mi biblioteca')),
       body: SafeArea(
@@ -111,126 +106,112 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 24),
-                if (_needsEmailConfirmation) ...[
-                  const Text(
-                    'Revisá tu correo. Confirmá tu email para iniciar sesión.',
-                  ),
-                  const SizedBox(height: 16),
-                  FilledButton(
-                    onPressed: () => context.go('/'),
-                    child: const Text('Ir a iniciar sesión'),
-                  ),
-                ] else
-                  Form(
-                    key: _formKey,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      spacing: 16,
-                      children: [
-                        if (!login)
-                          TextFormField(
-                            controller: _name,
-                            enabled: !busy,
-                            decoration: const InputDecoration(
-                              labelText: 'Nombre',
-                            ),
-                            textCapitalization: TextCapitalization.words,
-                            textInputAction: completeProfile
-                                ? TextInputAction.done
-                                : TextInputAction.next,
-                            validator: requiredField,
+                Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    spacing: 16,
+                    children: [
+                      if (!login)
+                        TextFormField(
+                          controller: _name,
+                          enabled: !busy,
+                          decoration: const InputDecoration(
+                            labelText: 'Nombre',
                           ),
-                        if (!completeProfile) ...[
-                          TextFormField(
-                            controller: _email,
-                            enabled: !busy,
-                            decoration: const InputDecoration(
-                              labelText: 'Email',
-                            ),
-                            keyboardType: TextInputType.emailAddress,
-                            textInputAction: TextInputAction.next,
-                            autocorrect: false,
-                            validator: emailValidator,
-                          ),
-                          TextFormField(
-                            controller: _password,
-                            enabled: !busy,
-                            decoration: InputDecoration(
-                              labelText: 'Contraseña',
-                              suffixIcon: _visibilityButton(
-                                hidden: _hidePassword,
-                                field: 'contraseña',
-                                onPressed: () => setState(
-                                  () => _hidePassword = !_hidePassword,
-                                ),
+                          textCapitalization: TextCapitalization.words,
+                          textInputAction: completeProfile
+                              ? TextInputAction.done
+                              : TextInputAction.next,
+                          validator: requiredField,
+                        ),
+                      if (!completeProfile) ...[
+                        TextFormField(
+                          controller: _email,
+                          enabled: !busy,
+                          decoration: const InputDecoration(labelText: 'Email'),
+                          keyboardType: TextInputType.emailAddress,
+                          textInputAction: TextInputAction.next,
+                          autocorrect: false,
+                          validator: emailValidator,
+                        ),
+                        TextFormField(
+                          controller: _password,
+                          enabled: !busy,
+                          decoration: InputDecoration(
+                            labelText: 'Contraseña',
+                            suffixIcon: _visibilityButton(
+                              hidden: _hidePassword,
+                              field: 'contraseña',
+                              onPressed: () => setState(
+                                () => _hidePassword = !_hidePassword,
                               ),
                             ),
-                            obscureText: _hidePassword,
-                            autocorrect: false,
-                            enableSuggestions: false,
-                            textInputAction: login
-                                ? TextInputAction.done
-                                : TextInputAction.next,
-                            validator: requiredField,
                           ),
-                        ],
-                        if (register)
-                          TextFormField(
-                            controller: _confirmation,
-                            enabled: !busy,
-                            decoration: InputDecoration(
-                              labelText: 'Confirmar contraseña',
-                              suffixIcon: _visibilityButton(
-                                hidden: _hideConfirmation,
-                                field: 'confirmación de contraseña',
-                                onPressed: () => setState(
-                                  () => _hideConfirmation = !_hideConfirmation,
-                                ),
+                          obscureText: _hidePassword,
+                          autocorrect: false,
+                          enableSuggestions: false,
+                          textInputAction: login
+                              ? TextInputAction.done
+                              : TextInputAction.next,
+                          validator: requiredField,
+                        ),
+                      ],
+                      if (register)
+                        TextFormField(
+                          controller: _confirmation,
+                          enabled: !busy,
+                          decoration: InputDecoration(
+                            labelText: 'Confirmar contraseña',
+                            suffixIcon: _visibilityButton(
+                              hidden: _hideConfirmation,
+                              field: 'confirmación de contraseña',
+                              onPressed: () => setState(
+                                () => _hideConfirmation = !_hideConfirmation,
                               ),
                             ),
-                            obscureText: _hideConfirmation,
-                            autocorrect: false,
-                            enableSuggestions: false,
-                            validator: (value) {
-                              final error = requiredField(value);
-                              if (error != null) return error;
-                              if (value != _password.text) {
-                                return 'Las contraseñas no coinciden.';
-                              }
-                              return null;
-                            },
                           ),
-                        if (_error != null)
-                          Text(
-                            _error!,
-                            style: TextStyle(
-                              color: Theme.of(context).colorScheme.error,
-                            ),
-                          ),
-
-                        if (busy) const LinearProgressIndicator(),
-                        FilledButton(
-                          onPressed: busy ? null : _submit,
-                          child: Text(
-                            completeProfile ? 'Guardar nombre' : title,
+                          obscureText: _hideConfirmation,
+                          autocorrect: false,
+                          enableSuggestions: false,
+                          validator: (value) {
+                            final error = requiredField(value);
+                            if (error != null) return error;
+                            if (value != _password.text) {
+                              return 'Las contraseñas no coinciden.';
+                            }
+                            return null;
+                          },
+                        ),
+                      if (message != null)
+                        Text(
+                          message,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
                           ),
                         ),
-                        if (login)
-                          TextButton(
-                            onPressed: busy
-                                ? null
-                                : () => context.go('/register'),
-                            child: const Text('Crear cuenta'),
-                          ),
 
-                        if (completeProfile)
-                          TextButton(
-                            onPressed: busy ? null : _signOut,
-                            child: const Text('Cerrar sesión'),
-                          ),
-                      ],
-                    ),
+                      if (busy) const LinearProgressIndicator(),
+                      FilledButton(
+                        onPressed: busy ? null : _submit,
+                        child: Text(completeProfile ? 'Guardar nombre' : title),
+                      ),
+                      if (login)
+                        TextButton(
+                          onPressed: busy
+                              ? null
+                              : () => context.go('/register'),
+                          child: const Text('Crear cuenta'),
+                        ),
+
+                      if (completeProfile)
+                        TextButton(
+                          onPressed: busy ? null : _signOut,
+                          child: const Text('Cerrar sesión'),
+                        ),
+                    ],
                   ),
+                ),
               ],
             ),
           ),

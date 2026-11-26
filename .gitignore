@@ -46,3 +46,6 @@ app.*.map.json
 
 # Configuración local de Supabase
 /supabase.local.json
+
+# Datos locales de Firebase Emulator Suite
+/firebase-data/

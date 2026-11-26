@@ -22,7 +22,7 @@ class BookFormScreen extends ConsumerWidget {
     if (user == null) return const Scaffold();
 
     return ref
-        .watch(bookProvider((userId: user.id, bookId: id)))
+        .watch(bookProvider((userId: user.uid, bookId: id)))
         .when(
           loading: () => Scaffold(
             appBar: AppBar(title: const Text('Editar libro')),
@@ -32,7 +32,7 @@ class BookFormScreen extends ConsumerWidget {
             appBar: AppBar(title: const Text('Editar libro')),
             body: ScreenMessage(
               bookErrorMessage(error, 'cargar el libro'),
-              onRetry: () => ref.invalidate(bookListProvider(user.id)),
+              onRetry: () => ref.invalidate(bookListProvider(user.uid)),
             ),
           ),
           data: (book) => book == null

@@ -1,0 +1,25 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{userId}/books/{bookId} {
+      function isOwner() {
+        return request.auth != null && request.auth.uid == userId;
+      }
+
+      function validBook() {
+        let data = request.resource.data;
+        let fields = ['title', 'author', 'year', 'description', 'coverUrl'];
+        return data.keys().hasAll(fields) && data.keys().hasOnly(fields)
+          && data.title is string && data.title.size() > 0
+          && data.author is string && data.author.size() > 0
+          && data.year is int
+          && data.description is string && data.description.size() > 0
+          && data.coverUrl is string && data.coverUrl.matches('https://.+');
+      }
+
+      allow read, delete: if isOwner();
+      allow create, update: if isOwner() && validBook();
+    }
+  }
+}

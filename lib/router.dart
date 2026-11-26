@@ -12,8 +12,9 @@ import 'widgets/screen_message.dart';
 final routerProvider = Provider<GoRouter>((ref) {
   final refresh = _RouteRefresh();
 
-  // Las rutas se reevalúan cuando cambia la sesión de Supabase.
+  // Las rutas se reevalúan cuando cambia la sesión o termina el registro.
   ref.listen(sessionProvider, (_, _) => refresh.update());
+  ref.listen(authActionsProvider, (_, _) => refresh.update());
 
   final router = GoRouter(
     refreshListenable: refresh,
@@ -30,7 +31,11 @@ final routerProvider = Provider<GoRouter>((ref) {
         return path == '/' || path == '/register' ? null : '/';
       }
 
-      if (userDisplayName(user) == null) {
+      // Firebase abre una sesión en cuanto crea la cuenta. Esperamos el nombre.
+      if (path == '/register' && ref.read(authActionsProvider).isLoading) {
+        return null;
+      }
+      if (user.displayName?.trim().isNotEmpty != true) {
         return path == '/profile' ? null : '/profile';
       }
 

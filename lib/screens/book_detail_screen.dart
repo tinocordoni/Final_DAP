@@ -19,7 +19,7 @@ class BookDetailScreen extends ConsumerWidget {
     if (user == null) return const Scaffold();
 
     final selectedBook = ref.watch(
-      bookProvider((userId: user.id, bookId: bookId)),
+      bookProvider((userId: user.uid, bookId: bookId)),
     );
     final busy = ref.watch(bookActionsProvider).isLoading;
     return Scaffold(
@@ -28,7 +28,7 @@ class BookDetailScreen extends ConsumerWidget {
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (error, _) => ScreenMessage(
           bookErrorMessage(error, 'cargar el libro'),
-          onRetry: () => ref.invalidate(bookListProvider(user.id)),
+          onRetry: () => ref.invalidate(bookListProvider(user.uid)),
         ),
         data: (book) {
           if (book == null) {

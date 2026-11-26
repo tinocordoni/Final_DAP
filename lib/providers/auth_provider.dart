@@ -1,93 +1,92 @@
-import 'package:flutter/foundation.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'supabase_provider.dart';
-
-final sessionProvider = StreamProvider<User?>((ref) {
-  final auth = ref.watch(supabaseProvider).auth;
-
-  // Supabase restaura la sesión al iniciar y emite los cambios de Auth.
-  return auth.onAuthStateChange.map((change) => change.session?.user);
+final firebaseAuthProvider = Provider<FirebaseAuth>((ref) {
+  return FirebaseAuth.instance;
 });
 
-String? userDisplayName(User user) {
-  final name = user.userMetadata?['display_name'];
-  return name is String && name.trim().isNotEmpty ? name.trim() : null;
-}
+final sessionProvider = StreamProvider<User?>((ref) {
+  // Firebase emite la sesión restaurada y los cambios de perfil, ingreso y salida.
+  return ref.watch(firebaseAuthProvider).userChanges();
+});
 
 final authActionsProvider = AsyncNotifierProvider<AuthActions, void>(
   AuthActions.new,
 );
 
 class AuthActions extends AsyncNotifier<void> {
-  GoTrueClient get _auth => ref.read(supabaseProvider).auth;
+  FirebaseAuth get _auth => ref.read(firebaseAuthProvider);
 
   @override
   void build() {}
 
   Future<void> signIn(String email, String password) {
     return _run(() async {
-      await _auth.signInWithPassword(email: email, password: password);
+      await _auth.signInWithEmailAndPassword(email: email, password: password);
     });
   }
 
-  Future<bool> register(String name, String email, String password) async {
-    var needsEmailConfirmation = false;
-
-    await _run(() async {
-      final response = await _auth.signUp(
+  Future<void> register(String name, String email, String password) {
+    return _run(() async {
+      final credential = await _auth.createUserWithEmailAndPassword(
         email: email,
         password: password,
-        // Supabase guarda el nombre en el perfil al crear la cuenta.
-        data: {'display_name': name},
-        emailRedirectTo: kIsWeb
-            ? Uri.base.removeFragment().toString()
-            : 'ar.edu.ort.finaldap://auth-callback/',
       );
-      needsEmailConfirmation = response.session == null;
-    });
 
-    return needsEmailConfirmation;
+      // El nombre vive en el perfil de Firebase Authentication.
+      try {
+        await credential.user!.updateDisplayName(name);
+      } on FirebaseAuthException catch (error) {
+        throw ProfileSaveException(error);
+      }
+    });
   }
 
   Future<void> completeProfile(String name) {
     return _run(() async {
-      await _auth.updateUser(UserAttributes(data: {'display_name': name}));
+      final user = _auth.currentUser;
+      if (user == null) {
+        throw StateError('No hay una sesión activa.');
+      }
+      await user.updateDisplayName(name);
     });
   }
 
-  Future<void> signOut() {
-    return _run(() => _auth.signOut(scope: SignOutScope.local));
-  }
+  Future<void> signOut() => _run(_auth.signOut);
 
+  // AsyncValue permite deshabilitar los botones y mostrar errores de Firebase.
   Future<void> _run(Future<void> Function() action) async {
     state = const AsyncLoading();
     state = await AsyncValue.guard(action);
   }
 }
 
+class ProfileSaveException implements Exception {
+  const ProfileSaveException(this.cause);
+
+  final FirebaseAuthException cause;
+}
+
 String authErrorMessage(Object error) {
-  if (error is AuthRetryableFetchException) {
-    return 'Revisá tu conexión y volvé a intentar.';
+  if (error is ProfileSaveException) {
+    return 'Tu cuenta se creó. No pudimos guardar el nombre. ${authErrorMessage(error.cause)}';
   }
 
-  if (error is AuthException) {
+  if (error is FirebaseAuthException) {
     return switch (error.code) {
-      'email_address_invalid' ||
-      'validation_failed' => 'Revisá los datos ingresados.',
-      'email_exists' ||
-      'user_already_exists' => 'Ya existe una cuenta con ese email.',
-      'weak_password' => 'Probá con una contraseña más segura.',
-      'invalid_credentials' => 'El email o la contraseña son incorrectos.',
-      'email_not_confirmed' => 'Confirmá tu email antes de iniciar sesión.',
-      'email_address_not_authorized' =>
-        'Este proyecto todavía no puede enviar correos de confirmación a esa dirección.',
-      'user_banned' => 'Esta cuenta está deshabilitada.',
-      'over_email_send_rate_limit' ||
-      'over_request_rate_limit' => 'Hubo demasiados intentos. Probá más tarde.',
-      'email_provider_disabled' || 'signup_disabled' =>
-        'El registro con email está deshabilitado en Supabase.',
+      'invalid-email' => 'Ingresá un email válido.',
+      'email-already-in-use' => 'Ya existe una cuenta con ese email.',
+      'weak-password' =>
+        'Firebase rechazó la contraseña. Probá con una más segura.',
+      'invalid-credential' ||
+      'invalid-login-credentials' ||
+      'user-not-found' ||
+      'wrong-password' => 'El email o la contraseña son incorrectos.',
+      'user-disabled' => 'Esta cuenta está deshabilitada.',
+      'network-request-failed' => 'Revisá tu conexión y volvé a intentar.',
+      'too-many-requests' => 'Hubo demasiados intentos. Probá más tarde.',
+      'operation-not-allowed' =>
+        'El ingreso con email y contraseña está deshabilitado en Firebase.',
       _ => 'No se pudo completar la operación. Volvé a intentar.',
     };
   }

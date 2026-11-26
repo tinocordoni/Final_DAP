@@ -15,25 +15,25 @@ class Book {
   final String description;
   final String coverUrl;
 
-  factory Book.fromMap(Map<String, dynamic> data) {
+  factory Book.fromMap(String id, Map<String, dynamic> data) {
     return Book(
-      id: data['id'] as String,
+      id: id,
       title: data['title'] as String,
       author: data['author'] as String,
       year: data['year'] as int,
       description: data['description'] as String,
-      coverUrl: data['cover_url'] as String,
+      coverUrl: data['coverUrl'] as String,
     );
   }
 
-  // El ID y el dueño los asigna PostgreSQL al crear la fila.
+  // Firestore asigna el ID al crear el documento.
   Map<String, dynamic> toMap() {
     return {
       'title': title,
       'author': author,
       'year': year,
       'description': description,
-      'cover_url': coverUrl,
+      'coverUrl': coverUrl,
     };
   }
 }

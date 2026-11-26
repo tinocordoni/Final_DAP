@@ -1,53 +1,34 @@
-import 'dart:async';
-
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/book.dart';
-import 'supabase_provider.dart';
+import 'auth_provider.dart';
+
+final firestoreProvider = Provider<FirebaseFirestore>((ref) {
+  return FirebaseFirestore.instance;
+});
+
+final _bookCollectionProvider = Provider.autoDispose
+    .family<CollectionReference<Map<String, dynamic>>, String>((ref, userId) {
+      // Cada usuario tiene su propia subcolección de libros en Firestore.
+      return ref
+          .watch(firestoreProvider)
+          .collection('users')
+          .doc(userId)
+          .collection('books');
+    });
 
 final bookListProvider = StreamProvider.autoDispose.family<List<Book>, String>((
   ref,
   userId,
 ) {
-  final supabase = ref.watch(supabaseProvider);
+  final collection = ref.watch(_bookCollectionProvider(userId));
 
-  final refresh = StreamController<void>();
-
-  void reload() {
-    if (!refresh.isClosed) refresh.add(null);
-  }
-
-  final channel = supabase
-      .channel('books:$userId')
-      .onPostgresChanges(
-        event: PostgresChangeEvent.all,
-        schema: 'public',
-        table: 'books',
-        filter: PostgresChangeFilter(
-          type: PostgresChangeFilterType.eq,
-          column: 'owner_id',
-          value: userId,
-        ),
-        callback: (_) => reload(),
-      )
-      .subscribe((status, _) {
-        if (status == RealtimeSubscribeStatus.subscribed) reload();
-      });
-  ref.onDispose(() {
-    unawaited(refresh.close());
-    unawaited(supabase.removeChannel(channel));
-  });
-
-  reload();
-  // Realtime pide otra consulta. PostgreSQL devuelve una sola fila por libro.
-  return refresh.stream.asyncMap((_) async {
-    final rows = await supabase
-        .from('books')
-        .select()
-        .eq('owner_id', userId)
-        .order('title', ascending: true);
-    return rows.map(Book.fromMap).toList();
+  // snapshots emite el listado inicial y vuelve a emitir después de cada cambio.
+  return collection.orderBy('title').snapshots().map((snapshot) {
+    return snapshot.docs
+        .map((doc) => Book.fromMap(doc.id, doc.data()))
+        .toList();
   });
 });
 
@@ -71,65 +52,42 @@ class BookActions extends AsyncNotifier<void> {
   void build() {}
 
   Future<void> add(Book book) {
-    return _write((supabase, userId) async {
-      // PostgreSQL genera el UUID y toma el dueño de la sesión autenticada.
-      await supabase.from('books').insert(book.toMap());
+    return _write((collection) async {
+      // add genera el ID del documento automáticamente.
+      await collection.add(book.toMap());
     });
   }
 
   Future<void> updateBook(Book book) {
-    return _write((supabase, userId) async {
-      final updated = await supabase
-          .from('books')
-          .update(book.toMap())
-          .eq('id', book.id)
-          .eq('owner_id', userId)
-          .select('id')
-          .maybeSingle();
-      if (updated == null) throw const _BookNotFound();
-    });
+    return _write((collection) => collection.doc(book.id).update(book.toMap()));
   }
 
   Future<void> delete(String bookId) {
-    return _write((supabase, userId) async {
-      await supabase
-          .from('books')
-          .delete()
-          .eq('id', bookId)
-          .eq('owner_id', userId);
-    });
+    return _write((collection) => collection.doc(bookId).delete());
   }
 
   Future<void> _write(
-    Future<void> Function(SupabaseClient supabase, String userId) action,
+    Future<void> Function(CollectionReference<Map<String, dynamic>>) action,
   ) async {
     state = const AsyncLoading();
     state = await AsyncValue.guard(() async {
-      final supabase = ref.read(supabaseProvider);
-      final user = supabase.auth.currentUser;
+      final user = ref.read(firebaseAuthProvider).currentUser;
       if (user == null) {
         throw StateError('No hay una sesión activa.');
       }
-
-      await action(supabase, user.id);
-      // Vuelve a consultar después de guardar, incluso si Realtime se desconectó.
-      ref.invalidate(bookListProvider(user.id));
+      await action(ref.read(_bookCollectionProvider(user.uid)));
     });
   }
 }
 
-class _BookNotFound implements Exception {
-  const _BookNotFound();
-}
-
 String bookErrorMessage(Object error, String operation) {
-  if (error is _BookNotFound) {
-    return 'Este libro ya no está en la biblioteca.';
-  }
-  if (error is PostgrestException) {
+  if (error is FirebaseException) {
     return switch (error.code) {
-      '42501' => 'Supabase rechazó el acceso a la biblioteca.',
-      '23514' => 'Revisá los datos del libro y volvé a intentar.',
+      'permission-denied' =>
+        'Firestore rechazó el acceso. Revisá la sesión y las reglas de la base.',
+      'unavailable' =>
+        'Firestore no está disponible. Revisá tu conexión y volvé a intentar.',
+      'not-found' => 'Este libro ya no está en la biblioteca.',
       _ => 'No se pudo $operation. Volvé a intentar.',
     };
   }
